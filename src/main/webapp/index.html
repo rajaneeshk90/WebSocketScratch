@@ -142,7 +142,7 @@
         
         function connect() {
             // Create WebSocket connection
-            websocket = new WebSocket('ws://localhost:8081/chat');
+            websocket = new WebSocket('ws://localhost:8080/chat');
             
             websocket.onopen = function(event) {
                 console.log('Connected to WebSocket server');
