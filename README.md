@@ -119,6 +119,74 @@ Client Browser → Spring Boot Server → WebSocket Handler
   Connection        /chat endpoint    Message Broadcasting
 ```
 
+## Production Architecture
+
+### **Real-World WebSocket Setup with Reverse Proxy**
+
+```
+Client (Chrome) → Nginx (Reverse Proxy) → Multiple Backend Instances
+     ↓                    ↓                           ↓
+  WebSocket         Forwards Request           Tomcat + Spring
+  Connection        (HTTP Proxy Only)         WebSocket Handler
+                    Load Balancing            Session Management
+```
+
+### **What Each Component Does:**
+
+#### **1. Client (Browser)**
+- Initiates WebSocket connection to `ws://example.com/chat`
+- Handles WebSocket protocol on client side
+- Manages connection lifecycle and message handling
+
+#### **2. Nginx (Reverse Proxy)**
+- **Receives** initial WebSocket connection request
+- **Cannot handle** WebSocket protocol directly (HTTP-only)
+- **Forwards** request to backend application instances
+- **Load balances** across multiple backend servers
+- **Handles** SSL termination, static files, and HTTP requests
+
+#### **3. Backend Instances (Tomcat + Spring)**
+- **Multiple instances** for scalability and high availability
+- **Tomcat** handles HTTP upgrade to WebSocket protocol
+- **Spring Boot** manages WebSocket lifecycle and routing
+- **Creates** `WebSocketSession` objects from raw connections
+- **Your handler** receives pre-created sessions and manages business logic
+
+### **Connection Flow:**
+
+```
+1. Client → Nginx: ws://example.com/chat
+2. Nginx → Backend: Forwards HTTP upgrade request
+3. Backend → Tomcat: HTTP upgrade to WebSocket
+4. Tomcat → Spring: Raw WebSocket connection
+5. Spring → Handler: WebSocketSession object
+6. Handler → Business Logic: Session management and messaging
+```
+
+### **Why This Architecture:**
+
+#### **1. Separation of Concerns**
+- **Nginx**: HTTP proxy, SSL, load balancing, static files
+- **Backend**: WebSocket protocol, business logic, session management
+
+#### **2. Scalability**
+- **Nginx**: Handle thousands of HTTP connections efficiently
+- **Backend**: Scale horizontally with multiple instances
+- **Load balancing**: Distribute WebSocket connections across instances
+
+#### **3. Technology Specialization**
+- **Nginx**: Best at HTTP serving and proxying
+- **Tomcat**: Best at Java application hosting
+- **Spring**: Best at application logic and WebSocket management
+
+### **Key Points:**
+
+- ✅ **Nginx cannot handle WebSocket protocol** - it's HTTP-only
+- ✅ **Nginx acts as reverse proxy** - forwards requests to backend
+- ✅ **Backend applications handle WebSocket** - protocol upgrade and management
+- ✅ **Multiple backend instances** - for load balancing and high availability
+- ✅ **Spring wraps raw connections** - creates `WebSocketSession` objects
+
 ## WebSocket Protocol Flow
 
 1. **Handshake**: Client initiates HTTP upgrade request to `/chat`
