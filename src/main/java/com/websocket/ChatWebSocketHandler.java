@@ -6,6 +6,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,6 +40,18 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         sessions.add(session);
         int count = userCount.incrementAndGet();
+
+        // ✅ ADD CUSTOM ATTRIBUTES TO THE SESSION
+        // Note: userId will be set by client's USER_ID message
+        session.getAttributes().put("connectedAt", System.currentTimeMillis());
+        session.getAttributes().put("clientIP", session.getRemoteAddress().getAddress().getHostAddress());
+        session.getAttributes().put("userAgent", session.getRemoteAddress().getHostName());
+        session.getAttributes().put("status", "online");
+
+        System.out.println("New connection established: " + session.getId());
+        System.out.println("Session attributes: " + session.getAttributes());
+        System.out.println("Client IP: " + session.getAttributes().get("clientIP"));
+        System.out.println("User ID: " + session.getAttributes().get("userId"));
         
         // Send welcome message to the new user
         String welcomeMessage = "Welcome to the chat! Users online: " + count;
@@ -60,10 +73,108 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
-        System.out.println("Received message: " + payload);
+        
+        // ✅ HANDLE USER_ID MESSAGE FROM CLIENT
+        if (payload.startsWith("USER_ID:")) {
+            String clientUserId = payload.substring(8); // Remove "USER_ID:" prefix
+            session.getAttributes().put("userId", clientUserId);
+            System.out.println("Client set user ID: " + clientUserId);
+            return; // Don't broadcast USER_ID messages
+        }
+        
+        // ✅ HANDLE SET_ATTRIBUTE MESSAGE FROM CLIENT
+        if (payload.startsWith("SET_ATTRIBUTE:")) {
+            // Format: "SET_ATTRIBUTE:key:value"
+            String attributeData = payload.substring(14); // Remove "SET_ATTRIBUTE:" prefix
+            int colonIndex = attributeData.indexOf(':');
+            
+            if (colonIndex > 0) {
+                String key = attributeData.substring(0, colonIndex);
+                String value = attributeData.substring(colonIndex + 1);
+                
+                // Store the attribute in session
+                session.getAttributes().put(key, value);
+                System.out.println("✅ Client set attribute: " + key + " = " + value);
+                
+                // Send confirmation back to client
+                String confirmation = "Attribute set: " + key + " = " + value;
+                session.sendMessage(new TextMessage(confirmation));
+                
+                return; // Don't broadcast SET_ATTRIBUTE messages
+            } else {
+                System.out.println("❌ Invalid SET_ATTRIBUTE format: " + payload);
+                session.sendMessage(new TextMessage("Error: Invalid attribute format. Use SET_ATTRIBUTE:key:value"));
+                return;
+            }
+        }
+        
+        // ✅ HANDLE BATCH SET_ATTRIBUTES MESSAGE FROM CLIENT
+        if (payload.startsWith("SET_ATTRIBUTES_BATCH:")) {
+            // Format: "SET_ATTRIBUTES_BATCH:key1:value1|key2:value2|key3:value3"
+            String batchData = payload.substring(21); // Remove "SET_ATTRIBUTES_BATCH:" prefix
+            
+            if (batchData.length() > 0) {
+                String[] attributePairs = batchData.split("\\|");
+                int successCount = 0;
+                StringBuilder response = new StringBuilder("Batch attributes set:\n");
+                
+                for (String pair : attributePairs) {
+                    int colonIndex = pair.indexOf(':');
+                    if (colonIndex > 0) {
+                        String key = pair.substring(0, colonIndex);
+                        String value = pair.substring(colonIndex + 1);
+                        
+                        // Store the attribute in session
+                        session.getAttributes().put(key, value);
+                        response.append("- ").append(key).append(" = ").append(value).append("\n");
+                        successCount++;
+                        
+                        System.out.println("✅ Client set batch attribute: " + key + " = " + value);
+                    }
+                }
+                
+                // Send confirmation back to client
+                response.append("Total attributes set: ").append(successCount);
+                session.sendMessage(new TextMessage(response.toString()));
+                
+                return; // Don't broadcast SET_ATTRIBUTES_BATCH messages
+            } else {
+                System.out.println("❌ Invalid SET_ATTRIBUTES_BATCH format: " + payload);
+                session.sendMessage(new TextMessage("Error: Invalid batch format. Use SET_ATTRIBUTES_BATCH:key1:value1|key2:value2"));
+                return;
+            }
+        }
+        
+        // ✅ HANDLE GET_ATTRIBUTES MESSAGE FROM CLIENT
+        if (payload.equals("GET_ATTRIBUTES")) {
+            // Send all current session attributes back to client
+            StringBuilder attributesList = new StringBuilder("Current attributes:\n");
+            for (Map.Entry<String, Object> entry : session.getAttributes().entrySet()) {
+                attributesList.append("- ").append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
+            }
+            
+            session.sendMessage(new TextMessage(attributesList.toString()));
+            System.out.println("✅ Client requested attributes for session: " + session.getId());
+            return; // Don't broadcast GET_ATTRIBUTES messages
+        }
+        
+        // ✅ ACCESS EXISTING ATTRIBUTES
+        String userId = (String) session.getAttributes().get("userId");
+        String clientIP = (String) session.getAttributes().get("clientIP");
+        
+        // ✅ ADD/UPDATE ATTRIBUTES
+        Integer messageCount = (Integer) session.getAttributes().get("messageCount");
+        if (messageCount == null) {
+            messageCount = 0;
+        }
+        session.getAttributes().put("messageCount", messageCount + 1);
+        session.getAttributes().put("lastMessageTime", System.currentTimeMillis());
+        
+        System.out.println("Received message from " + userId + " (" + clientIP + "): " + payload);
+        System.out.println("User's message count: " + session.getAttributes().get("messageCount"));
         
         // Broadcast the message to all connected clients
-        broadcastMessage("User: " + payload);
+        broadcastMessage("User " + userId + ": " + payload);
     }
     
     /**

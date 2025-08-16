@@ -57,6 +57,13 @@ websocket/
 - Real-time message delivery
 - Error handling for failed message delivery
 
+### 6. **WebSocket Connection Limitations and Attribute Setting**
+- **Connection Request (No Payload)**: WebSocket connection requests are HTTP upgrade requests that cannot contain payloads
+- **No Data During Handshake**: Custom attributes cannot be sent during the initial WebSocket connection
+- **Post-Connection Attribute Setting**: Attributes must be set using `websocket.send()` calls after the connection is established
+- **Message Queue System**: The application implements a queue system to handle attribute requests made before connection
+- **Attribute Protocol**: Custom protocol for setting session attributes: `SET_ATTRIBUTE:key:value` and `SET_ATTRIBUTES_BATCH:key1:value1|key2:value2`
+
 ## Prerequisites
 
 - Java 17 or higher
@@ -98,6 +105,10 @@ http://localhost:8080
 - ✅ Error handling
 - ✅ Responsive UI
 - ✅ Spring Boot reliability
+- ✅ **Session attribute management** - Client can set custom session attributes
+- ✅ **Message queue system** - Handles requests before WebSocket connection
+- ✅ **Batch attribute setting** - Set multiple attributes in single message
+- ✅ **Smart attribute protocol** - Custom message format for efficient attribute management
 
 ## Spring Boot Benefits
 
@@ -194,6 +205,101 @@ Client (Chrome) → Nginx (Reverse Proxy) → Multiple Backend Instances
 3. **Registration**: Handler receives `afterConnectionEstablished` callback
 4. **Communication**: Bidirectional message exchange
 5. **Cleanup**: Handler receives `afterConnectionClosed` callback
+
+## WebSocket Connection Technical Details
+
+### **Connection Request Limitations**
+
+#### **1. No Payload During Handshake**
+```
+❌ NOT POSSIBLE - WebSocket connection request cannot contain payloads
+Browser → HTTP GET /chat HTTP/1.1
+         Upgrade: websocket
+         Connection: Upgrade
+         Sec-WebSocket-Key: [key]
+         [NO BODY/PAYLOAD - Just HTTP headers]
+```
+
+#### **2. Why No Payload?**
+- **WebSocket connection** is an **HTTP upgrade request**
+- **HTTP upgrade requests** don't support request bodies
+- **WebSocket handshake** is **header-only** by design
+- **Data transfer** happens **after** connection establishment
+
+#### **3. What You CAN Do During Handshake**
+```javascript
+// ✅ Query parameters in URL (limited data)
+let ws = new WebSocket('ws://localhost:8080/chat?userId=123&theme=dark');
+
+// ❌ Custom headers (not supported from JavaScript)
+let ws = new WebSocket('ws://localhost:8080/chat', {
+    headers: { 'X-Theme': 'dark' }  // ← This won't work
+});
+
+// ❌ Request body (not possible)
+let ws = new WebSocket('ws://localhost:8080/chat', {
+    body: "theme=dark&language=en"  // ← This won't work
+});
+```
+
+### **Post-Connection Attribute Setting**
+
+#### **1. Correct Approach**
+```javascript
+// ✅ Set attributes AFTER connection is established
+websocket.onopen = function() {
+    // Now you can send data
+    websocket.send('SET_ATTRIBUTE:theme:dark');
+    websocket.send('SET_ATTRIBUTE:language:en');
+};
+```
+
+#### **2. Message Queue System**
+The application implements a **smart queue system** to handle this limitation:
+
+```javascript
+// User clicks button before connection
+setAttribute('theme', 'dark');
+
+// Message gets queued if not connected
+if (websocket && websocket.readyState === WebSocket.OPEN) {
+    websocket.send(message);  // Send immediately
+} else {
+    messageQueue.push(message);  // Queue for later
+    addMessage('Attribute request queued - will send when connected', 'system');
+}
+
+// When connection opens, all queued messages are sent automatically
+websocket.onopen = function() {
+    processMessageQueue();  // ← Sends all queued messages!
+};
+```
+
+#### **3. Attribute Protocol**
+Custom protocol for efficient attribute management:
+
+```
+Single Attribute: SET_ATTRIBUTE:key:value
+Batch Attributes: SET_ATTRIBUTES_BATCH:key1:value1|key2:value2|key3:value3
+Get Attributes: GET_ATTRIBUTES
+```
+
+### **Technical Benefits of This Approach**
+
+#### **1. Protocol Compliance**
+- **Follows WebSocket standards** correctly
+- **No workarounds** for handshake limitations
+- **Clean separation** between connection and data
+
+#### **2. User Experience**
+- **No lost requests** due to connection timing
+- **Immediate feedback** (queued status)
+- **Automatic retry** when connection opens
+
+#### **3. Scalability**
+- **Efficient batch operations** (multiple attributes in one message)
+- **Reduced network overhead** (fewer messages)
+- **Better performance** for multiple attributes
 
 ## Learning Points
 

@@ -130,11 +130,19 @@
         <div class="chat-input">
             <input type="text" id="messageInput" placeholder="Type your message..." disabled>
             <button id="sendButton" disabled>Send</button>
+            
+            <!-- ✅ ADD ATTRIBUTE TESTING BUTTONS -->
+            <button id="setThemeBtn" disabled onclick="setAttribute('theme', 'dark')">Set Theme: Dark</button>
+            <button id="setLangBtn" disabled onclick="setAttribute('language', 'en')">Set Language: EN</button>
+            <button id="setBatchBtn" disabled onclick="setBatchAttributes()">Set Batch Attributes</button>
+            <button id="getAttrsBtn" disabled onclick="getAttributes()">Get Attributes</button>
         </div>
     </div>
 
     <script>
         let websocket;
+        let currentUserId = null; // ✅ TRACK CURRENT USER ID
+        let messageQueue = []; // ✅ QUEUE FOR MESSAGES WHEN NOT CONNECTED
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
@@ -146,15 +154,50 @@
             
             websocket.onopen = function(event) {
                 console.log('Connected to WebSocket server');
+                
+                // ✅ GENERATE CURRENT USER ID IMMEDIATELY ON CONNECTION
+                // This ensures we can filter out our own messages from the very first one
+                currentUserId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                
+                // ✅ SEND USER ID TO SERVER IMMEDIATELY
+                // This tells the server who we are so it can use our ID in broadcasts
+                websocket.send('USER_ID:' + currentUserId);
+                
                 statusDiv.textContent = 'Connected';
                 statusDiv.className = 'status connected';
                 messageInput.disabled = false;
                 sendButton.disabled = false;
+                
+                // ✅ ENABLE ATTRIBUTE TESTING BUTTONS
+                document.getElementById('setThemeBtn').disabled = false;
+                document.getElementById('setLangBtn').disabled = false;
+                document.getElementById('setBatchBtn').disabled = false;
+                document.getElementById('getAttrsBtn').disabled = false;
+                
                 messageInput.focus();
+                
+                // ✅ PROCESS QUEUED MESSAGES AFTER CONNECTION
+                processMessageQueue();
             };
             
             websocket.onmessage = function(event) {
                 console.log('Received message:', event.data);
+                
+                // ✅ SET CURRENT USER ID ON FIRST MESSAGE
+                if (!currentUserId && event.data.includes('User user_')) {
+                    const userId = event.data.match(/User (user_[^:]+):/)[1];
+                    if (userId) {
+                        currentUserId = userId;
+                    }
+                }
+                
+                // ✅ FILTER OUT OWN MESSAGES TO PREVENT DUPLICATES
+                if (currentUserId && event.data.includes('User ' + currentUserId + ':')) {
+                    // This is our own message coming back - don't show it again
+                    return;
+                }
+                
+                // ✅ Show ALL other messages (from other users or system)
                 addMessage(event.data, 'server');
             };
             
@@ -180,7 +223,7 @@
             const message = messageInput.value.trim();
             if (message && websocket && websocket.readyState === WebSocket.OPEN) {
                 websocket.send(message);
-                addMessage(message, 'user');
+                addMessage(message, 'user');  // ✅ Show immediately (blue bubble)
                 messageInput.value = '';
             }
         }
@@ -191,6 +234,65 @@
             messageDiv.textContent = message;
             chatMessages.appendChild(messageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        // ✅ FUNCTION TO PROCESS MESSAGE QUEUE
+        function processMessageQueue() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                while (messageQueue.length > 0) {
+                    const message = messageQueue.shift();
+                    websocket.send(message);
+                }
+            }
+        }
+        
+        // ✅ FUNCTION TO SET SESSION ATTRIBUTES
+        function setAttribute(key, value) {
+            const message = 'SET_ATTRIBUTE:' + key + ':' + value;
+            console.log('Setting attribute:', key, '=', value);
+            
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(message);
+            } else {
+                // Queue the message if not connected
+                messageQueue.push(message);
+                addMessage('Attribute request queued - will send when connected', 'system');
+            }
+        }
+        
+        // ✅ FUNCTION TO SET MULTIPLE ATTRIBUTES IN ONE MESSAGE
+        function setBatchAttributes() {
+            // Set 4 attributes in one message
+            const attributes = [
+                'theme:dark',
+                'language:en', 
+                'timezone:UTC+5:30',
+                'notifications:on'
+            ];
+            
+            const batchMessage = 'SET_ATTRIBUTES_BATCH:' + attributes.join('|');
+            console.log('Setting batch attributes:', attributes);
+            
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(batchMessage);
+            } else {
+                // Queue the message if not connected
+                messageQueue.push(batchMessage);
+                addMessage('Batch attributes queued - will send when connected', 'system');
+            }
+        }
+        
+        // ✅ FUNCTION TO GET ALL SESSION ATTRIBUTES
+        function getAttributes() {
+            console.log('Requesting all attributes');
+            
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send('GET_ATTRIBUTES');
+            } else {
+                // Queue the message if not connected
+                messageQueue.push('GET_ATTRIBUTES');
+                addMessage('Get attributes queued - will send when connected', 'system');
+            }
         }
         
         // Event listeners
